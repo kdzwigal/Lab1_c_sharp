@@ -5,4 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="KamilDzwigala11110_Lab1/**/*.cs" />
+    <Compile Remove="KamilDzwigala11110_Lab2/**/*.cs" />
+  </ItemGroup>
 </Project>

@@ -1,87 +1,46 @@
-using System;
-
 public class BankAccount
 {
-    private string _accountNumber = string.Empty;
-    private string _ownerName = string.Empty;
-    private decimal _balance;
-    private string _currency = string.Empty;
-    private bool _isActive;
-    private string _accountType = string.Empty;
-
     public BankAccount(
         string accountNumber,
-        string ownerName,
+        Customer owner,
         decimal balance,
         string currency,
         string accountType)
     {
-        AccountNumber = accountNumber;
-        OwnerName = ownerName;
-        Balance = balance;
-        Currency = currency;
-        AccountType = accountType;
-        _isActive = true;
+        AccountNumber = RequireText(accountNumber, nameof(accountNumber));
+        Owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        Balance = ValidateInitialBalance(balance);
+        Currency = ValidateCurrency(currency);
+        AccountType = RequireText(accountType, nameof(accountType));
+        IsActive = true;
     }
 
-    public string AccountNumber
-    {
-        get => _accountNumber;
-        set => _accountNumber = RequireText(value, nameof(AccountNumber));
-    }
+    public string AccountNumber { get; }
 
-    public string OwnerName
-    {
-        get => _ownerName;
-        set => _ownerName = RequireText(value, nameof(OwnerName));
-    }
+    public Customer Owner { get; }
 
-    public decimal Balance
-    {
-        get => _balance;
-        private set
-        {
-            if (value < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(value), "Balance cannot be negative.");
-            }
+    public decimal Balance { get; private set; }
 
-            _balance = value;
-        }
-    }
+    public string Currency { get; }
 
-    public string Currency
-    {
-        get => _currency;
-        set
-        {
-            string normalizedCurrency = RequireText(value, nameof(Currency)).ToUpperInvariant();
-            if (normalizedCurrency.Length != 3 || !IsAsciiLetters(normalizedCurrency))
-            {
-                throw new ArgumentException("Currency must be a three-letter code.", nameof(value));
-            }
+    public bool IsActive { get; private set; }
 
-            _currency = normalizedCurrency;
-        }
-    }
+    public string AccountType { get; }
 
-    public bool IsActive
-    {
-        get => _isActive;
-        set => _isActive = value;
-    }
-
-    public string AccountType
-    {
-        get => _accountType;
-        set => _accountType = RequireText(value, nameof(AccountType));
-    }
+    public List<Transaction> Transactions { get; } = new();
 
     public void Deposit(decimal amount)
     {
         EnsureActive();
         ValidatePositiveAmount(amount);
+
         Balance += amount;
+        Transactions.Add(new Transaction(
+            TransactionType.Deposit,
+            amount,
+            Currency,
+            "Wpłata środków",
+            destinationAccountNumber: AccountNumber));
     }
 
     public void Withdraw(decimal amount)
@@ -95,6 +54,12 @@ public class BankAccount
         }
 
         Balance -= amount;
+        Transactions.Add(new Transaction(
+            TransactionType.Withdrawal,
+            amount,
+            Currency,
+            "Wypłata środków",
+            sourceAccountNumber: AccountNumber));
     }
 
     public void TransferTo(BankAccount recipient, decimal amount)
@@ -119,16 +84,52 @@ public class BankAccount
             throw new InvalidOperationException("There are insufficient funds for this transfer.");
         }
 
-        decimal sourceBalanceAfterTransfer = Balance - amount;
-        decimal recipientBalanceAfterTransfer = recipient.Balance + amount;
-        Balance = sourceBalanceAfterTransfer;
-        recipient.Balance = recipientBalanceAfterTransfer;
+        Balance -= amount;
+        recipient.Balance += amount;
+
+        Transactions.Add(new Transaction(
+            TransactionType.TransferOut,
+            amount,
+            Currency,
+            $"Przelew do konta {recipient.AccountNumber}",
+            sourceAccountNumber: AccountNumber,
+            destinationAccountNumber: recipient.AccountNumber));
+
+        recipient.Transactions.Add(new Transaction(
+            TransactionType.TransferIn,
+            amount,
+            Currency,
+            $"Przelew z konta {AccountNumber}",
+            sourceAccountNumber: AccountNumber,
+            destinationAccountNumber: recipient.AccountNumber));
     }
 
     public string GetAccountSummary()
     {
-        return $"{OwnerName} | {AccountType} account | {Balance:F2} {Currency} | " +
-               $"{(IsActive ? "Active" : "Inactive")}";
+        return $"{AccountNumber} | {Owner.FullName} | {AccountType} | " +
+               $"{Balance:F2} {Currency} | {(IsActive ? "Aktywne" : "Nieaktywne")}";
+    }
+
+    public string GetCurrentBalance()
+    {
+        return $"{Balance:F2} {Currency}";
+    }
+
+    public void DisplayTransactionHistory()
+    {
+        if (Transactions.Count == 0)
+        {
+            Console.WriteLine("Brak transakcji.");
+            return;
+        }
+
+        foreach (Transaction transaction in Transactions)
+        {
+            Console.WriteLine(
+                $"{transaction.OccurredAt:yyyy-MM-dd HH:mm:ss} | " +
+                $"{transaction.Type,-11} | {transaction.Amount:F2} {transaction.Currency} | " +
+                transaction.Description);
+        }
     }
 
     private void EnsureActive()
@@ -139,12 +140,33 @@ public class BankAccount
         }
     }
 
+    private static decimal ValidateInitialBalance(decimal balance)
+    {
+        if (balance < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(balance), "Balance cannot be negative.");
+        }
+
+        return balance;
+    }
+
     private static void ValidatePositiveAmount(decimal amount)
     {
         if (amount <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be greater than zero.");
         }
+    }
+
+    private static string ValidateCurrency(string currency)
+    {
+        string normalizedCurrency = RequireText(currency, nameof(currency)).ToUpperInvariant();
+        if (normalizedCurrency.Length != 3 || normalizedCurrency.Any(character => character is < 'A' or > 'Z'))
+        {
+            throw new ArgumentException("Currency must be a three-letter code.", nameof(currency));
+        }
+
+        return normalizedCurrency;
     }
 
     private static string RequireText(string value, string parameterName)
@@ -155,18 +177,5 @@ public class BankAccount
         }
 
         return value.Trim();
-    }
-
-    private static bool IsAsciiLetters(string value)
-    {
-        foreach (char character in value)
-        {
-            if (character is < 'A' or > 'Z')
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }
