@@ -3,7 +3,9 @@ public enum TransactionType
     Deposit,
     Withdrawal,
     TransferOut,
-    TransferIn
+    TransferIn,
+    Fee,
+    Interest
 }
 
 public class Transaction

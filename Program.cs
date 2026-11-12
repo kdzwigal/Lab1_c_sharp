@@ -4,48 +4,65 @@ public static class Program
 {
     public static void Main()
     {
-        var customer1 = new Customer("C001", "Anna", "Kowalska");
-        var customer2 = new Customer("C002", "Jan", "Nowak");
-        var customer3 = new Customer("C003", "Maria", "Wiśniewska");
-        var customer4 = new Customer("C004", "Piotr", "Zieliński");
-        var customer5 = new Customer("C005", "Ewa", "Wójcik");
-        var customer6 = new Customer("C006", "Tomasz", "Kamiński");
+        Console.WriteLine(BankHelper.GetBankInformation());
+        Console.WriteLine($"Przykładowy numer konta: {BankHelper.GenerateSampleAccountNumber(1005)}");
 
-        var account1 = new BankAccount("1001", customer1, 0m, "PLN", "Personal");
-        var account2 = new BankAccount("1002", customer2, 0m, "PLN", "Savings");
-        var account3 = new BankAccount("1003", customer3, 0m, "PLN", "Business");
-        var account4 = new BankAccount("1004", customer4, 0m, "PLN", "Personal");
-        var account5 = new BankAccount("1005", customer5, 0m, "PLN", "Savings");
-        var account6 = new BankAccount("1006", customer6, 0m, "PLN", "Business");
+        var savings = new SavingsAccount(
+            "1001",
+            new Customer("C001", "Anna", "Kowalska"),
+            0m,
+            "PLN",
+            annualInterestRate: 0.06m);
+        var business = new BusinessAccount(
+            "1002",
+            new Customer("C002", "Jan", "Nowak"),
+            0m,
+            "PLN",
+            taxId: "5250001001",
+            transferCommissionRate: 0.01m);
+        var personal = new PersonalAccount(
+            "1003",
+            new Customer("C003", "Maria", "Wiśniewska"),
+            0m,
+            "PLN",
+            freeTransfersPerMonth: 1);
+        var secondSavings = new SavingsAccount(
+            "1004",
+            new Customer("C004", "Piotr", "Zieliński"),
+            0m,
+            "PLN",
+            annualInterestRate: 0.04m);
 
-        account1.Deposit(1_000m);
-        account2.Deposit(2_500m);
-        account1.Withdraw(200m);
-        account2.TransferTo(account3, 500m);
-        account3.Withdraw(100m);
+        List<BankAccount> accounts = new() { savings, business, personal, secondSavings };
 
-        account4.Deposit(4_000m);
-        account4.TransferTo(account5, 750m);
-        account5.Deposit(1_200m);
-        account5.Withdraw(300m);
-        account6.Deposit(8_500m);
-        account6.TransferTo(account4, 1_000m);
+        savings.Deposit(3_000m);
+        savings.ApplyMonthlyInterest();
+        savings.TransferTo(business, 500m);
 
-        List<BankAccount> accounts = new()
-        {
-            account1, account2, account3, account4, account5, account6
-        };
+        business.Deposit(8_000m);
+        business.TransferTo(personal, 1_000m);
+        business.ApplyMonthlyFee();
 
+        personal.Deposit(1_500m);
+        personal.TransferTo(secondSavings, 200m);
+        personal.TransferTo(secondSavings, 100m);
+        personal.Withdraw(50m);
+
+        secondSavings.Deposit(2_000m);
+        secondSavings.ApplyMonthlyInterest();
+        secondSavings.ApplyMonthlyFee();
+
+        Console.WriteLine();
         Console.WriteLine("Stan wszystkich kont po operacjach:");
         foreach (BankAccount account in accounts)
         {
             Console.WriteLine(account.GetAccountSummary());
-            Console.WriteLine($"Aktualne saldo: {account.GetCurrentBalance()}");
+            Console.WriteLine($"Opłata miesięczna: {account.CalculateMonthlyFee():F2} {account.Currency}");
         }
 
         Console.WriteLine();
-        Console.WriteLine($"Historia transakcji konta {account2.AccountNumber}:");
-        account2.DisplayTransactionHistory();
+        Console.WriteLine($"Historia transakcji konta firmowego {business.AccountNumber}:");
+        business.DisplayTransactionHistory();
 
         JsonSerializerOptions jsonOptions = new()
         {

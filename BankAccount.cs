@@ -1,13 +1,24 @@
-public class BankAccount
+using System.Text.Json.Serialization;
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(SavingsAccount), "savings")]
+[JsonDerivedType(typeof(BusinessAccount), "business")]
+[JsonDerivedType(typeof(PersonalAccount), "personal")]
+public abstract class BankAccount
 {
-    public BankAccount(
+    protected BankAccount(
         string accountNumber,
         Customer owner,
         decimal balance,
         string currency,
         string accountType)
     {
-        AccountNumber = RequireText(accountNumber, nameof(accountNumber));
+        if (!BankHelper.IsValidAccountNumber(accountNumber))
+        {
+            throw new ArgumentException("Account number must contain 4 to 26 digits.", nameof(accountNumber));
+        }
+
+        AccountNumber = accountNumber.Trim();
         Owner = owner ?? throw new ArgumentNullException(nameof(owner));
         Balance = ValidateInitialBalance(balance);
         Currency = ValidateCurrency(currency);
@@ -29,42 +40,100 @@ public class BankAccount
 
     public List<Transaction> Transactions { get; } = new();
 
-    public void Deposit(decimal amount)
+    public abstract decimal CalculateMonthlyFee();
+
+    public virtual void ApplyMonthlyFee() => ChargeMonthlyFee();
+
+    public virtual void Deposit(decimal amount)
     {
         EnsureActive();
         ValidatePositiveAmount(amount);
-
         Balance += amount;
-        Transactions.Add(new Transaction(
-            TransactionType.Deposit,
-            amount,
-            Currency,
-            "Wpłata środków",
-            destinationAccountNumber: AccountNumber));
+        AddTransaction(TransactionType.Deposit, amount, "Wpłata środków", destinationAccountNumber: AccountNumber);
     }
 
-    public void Withdraw(decimal amount)
+    public virtual void Withdraw(decimal amount)
     {
         EnsureActive();
         ValidatePositiveAmount(amount);
-
-        if (amount > Balance)
-        {
-            throw new InvalidOperationException("There are insufficient funds for this withdrawal.");
-        }
-
+        EnsureSufficientFunds(amount, "There are insufficient funds for this withdrawal.");
         Balance -= amount;
-        Transactions.Add(new Transaction(
-            TransactionType.Withdrawal,
-            amount,
-            Currency,
-            "Wypłata środków",
-            sourceAccountNumber: AccountNumber));
+        AddTransaction(TransactionType.Withdrawal, amount, "Wypłata środków", sourceAccountNumber: AccountNumber);
     }
 
-    public void TransferTo(BankAccount recipient, decimal amount)
+    public virtual void TransferTo(BankAccount recipient, decimal amount)
     {
         ArgumentNullException.ThrowIfNull(recipient);
+        EnsureTransferIsPossible(recipient, amount);
+
+        decimal fee = CalculateTransferFee(amount);
+        EnsureSufficientFunds(amount + fee, "There are insufficient funds for this transfer and its fee.");
+        Balance -= amount + fee;
+        recipient.Balance += amount;
+
+        AddTransaction(
+            TransactionType.TransferOut,
+            amount,
+            $"Przelew do konta {recipient.AccountNumber}",
+            sourceAccountNumber: AccountNumber,
+            destinationAccountNumber: recipient.AccountNumber);
+        recipient.AddTransaction(
+            TransactionType.TransferIn,
+            amount,
+            $"Przelew z konta {AccountNumber}",
+            sourceAccountNumber: AccountNumber,
+            destinationAccountNumber: recipient.AccountNumber);
+
+        if (fee > 0)
+        {
+            AddTransaction(TransactionType.Fee, fee, "Prowizja za przelew", sourceAccountNumber: AccountNumber);
+        }
+    }
+
+    protected virtual decimal CalculateTransferFee(decimal amount) => 0m;
+
+    protected void ChargeMonthlyFee()
+    {
+        decimal fee = CalculateMonthlyFee();
+        if (fee <= 0)
+        {
+            return;
+        }
+
+        EnsureSufficientFunds(fee, "There are insufficient funds for the monthly fee.");
+        Balance -= fee;
+        AddTransaction(TransactionType.Fee, fee, "Miesięczna opłata za prowadzenie konta", sourceAccountNumber: AccountNumber);
+    }
+
+    protected void AddInterest(decimal amount)
+    {
+        if (amount <= 0)
+        {
+            return;
+        }
+
+        Balance += amount;
+        AddTransaction(TransactionType.Interest, amount, "Naliczono odsetki", destinationAccountNumber: AccountNumber);
+    }
+
+    protected void EnsureActive()
+    {
+        if (!IsActive)
+        {
+            throw new InvalidOperationException("The account is inactive.");
+        }
+    }
+
+    protected static void ValidatePositiveAmount(decimal amount)
+    {
+        if (amount <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be greater than zero.");
+        }
+    }
+
+    private void EnsureTransferIsPossible(BankAccount recipient, decimal amount)
+    {
         EnsureActive();
         recipient.EnsureActive();
         ValidatePositiveAmount(amount);
@@ -78,66 +147,30 @@ public class BankAccount
         {
             throw new InvalidOperationException("Transfers require both accounts to use the same currency.");
         }
+    }
 
+    private void EnsureSufficientFunds(decimal amount, string message)
+    {
         if (amount > Balance)
         {
-            throw new InvalidOperationException("There are insufficient funds for this transfer.");
+            throw new InvalidOperationException(message);
         }
+    }
 
-        Balance -= amount;
-        recipient.Balance += amount;
-
+    private void AddTransaction(
+        TransactionType type,
+        decimal amount,
+        string description,
+        string? sourceAccountNumber = null,
+        string? destinationAccountNumber = null)
+    {
         Transactions.Add(new Transaction(
-            TransactionType.TransferOut,
+            type,
             amount,
             Currency,
-            $"Przelew do konta {recipient.AccountNumber}",
-            sourceAccountNumber: AccountNumber,
-            destinationAccountNumber: recipient.AccountNumber));
-
-        recipient.Transactions.Add(new Transaction(
-            TransactionType.TransferIn,
-            amount,
-            Currency,
-            $"Przelew z konta {AccountNumber}",
-            sourceAccountNumber: AccountNumber,
-            destinationAccountNumber: recipient.AccountNumber));
-    }
-
-    public string GetAccountSummary()
-    {
-        return $"{AccountNumber} | {Owner.FullName} | {AccountType} | " +
-               $"{Balance:F2} {Currency} | {(IsActive ? "Aktywne" : "Nieaktywne")}";
-    }
-
-    public string GetCurrentBalance()
-    {
-        return $"{Balance:F2} {Currency}";
-    }
-
-    public void DisplayTransactionHistory()
-    {
-        if (Transactions.Count == 0)
-        {
-            Console.WriteLine("Brak transakcji.");
-            return;
-        }
-
-        foreach (Transaction transaction in Transactions)
-        {
-            Console.WriteLine(
-                $"{transaction.OccurredAt:yyyy-MM-dd HH:mm:ss} | " +
-                $"{transaction.Type,-11} | {transaction.Amount:F2} {transaction.Currency} | " +
-                transaction.Description);
-        }
-    }
-
-    private void EnsureActive()
-    {
-        if (!IsActive)
-        {
-            throw new InvalidOperationException("The account is inactive.");
-        }
+            description,
+            sourceAccountNumber,
+            destinationAccountNumber));
     }
 
     private static decimal ValidateInitialBalance(decimal balance)
@@ -148,14 +181,6 @@ public class BankAccount
         }
 
         return balance;
-    }
-
-    private static void ValidatePositiveAmount(decimal amount)
-    {
-        if (amount <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(amount), "Amount must be greater than zero.");
-        }
     }
 
     private static string ValidateCurrency(string currency)
@@ -177,5 +202,28 @@ public class BankAccount
         }
 
         return value.Trim();
+    }
+
+    public string GetAccountSummary() =>
+        $"{AccountNumber} | {Owner.FullName} | {AccountType} | " +
+        $"{Balance:F2} {Currency} | {(IsActive ? "Aktywne" : "Nieaktywne")}";
+
+    public string GetCurrentBalance() => $"{Balance:F2} {Currency}";
+
+    public void DisplayTransactionHistory()
+    {
+        if (Transactions.Count == 0)
+        {
+            Console.WriteLine("Brak transakcji.");
+            return;
+        }
+
+        foreach (Transaction transaction in Transactions)
+        {
+            Console.WriteLine(
+                $"{transaction.OccurredAt:yyyy-MM-dd HH:mm:ss} | " +
+                $"{transaction.Type,-11} | {transaction.Amount:F2} {transaction.Currency} | " +
+                transaction.Description);
+        }
     }
 }
